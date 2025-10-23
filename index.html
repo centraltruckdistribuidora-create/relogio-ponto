@@ -1348,10 +1348,8 @@
         // Registrar ponto
         function registrar(tipo) {
             const agora = new Date();
-            const brasilOffset = -3; // UTC-3 (horário de Brasília)
-            const horaBrasil = new Date(agora.getTime() + (brasilOffset * 60 * 60 * 1000));
-            const hoje = `${horaBrasil.getUTCFullYear()}-${String(horaBrasil.getUTCMonth() + 1).padStart(2, '0')}-${String(horaBrasil.getUTCDate()).padStart(2, '0')}`;
-            const horario = horaBrasil.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false });
+            const hoje = agora.toISOString().split('T')[0]; // Formato YYYY-MM-DD
+            const horario = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false });
 
             // Verificar duplicatas
             const registrosHoje = usuarioAtual.registros.filter(r => r.data === hoje);
