@@ -885,8 +885,14 @@
         const RAIO_PERMITIDO_METROS = 50; // Raio de 50 metros
 
         // Inicialização
-        document.addEventListener('DOMContentLoaded', function() {
-            carregarDados();
+        document.addEventListener('DOMContentLoaded', async function() {
+            try {
+                await carregarDados();
+            } catch (e) {
+                // carregarDados já trata fallback; não bloquear a UI
+                console.warn('carregarDados apresentou erro mas continuando com fallback/local:', e);
+            }
+            // Garantir atualização da interface mesmo que o carregamento tenha falhado
             atualizarListaUsuarios();
             atualizarStatus();
             atualizarRelogio();
@@ -955,26 +961,33 @@
                 console.log('Dados carregados do Supabase com sucesso');
             } catch (error) {
                 console.error('Erro ao carregar dados do Supabase:', error);
-                // Fallback para LocalStorage se offline
-                if (!navigator.onLine) {
-                    console.log('Offline: carregando do LocalStorage');
-                    usuarios = JSON.parse(localStorage.getItem('usuarios')) || [];
-                    tentativasLogin = JSON.parse(localStorage.getItem('tentativasLogin')) || {};
-                    logsSeguranca = JSON.parse(localStorage.getItem('logsSeguranca')) || [];
-                    if (!usuarios.find(u => u.usuario === 'admin')) {
-                        usuarios.push({
-                            id: 1,
-                            nome: 'Administrador',
-                            usuario: 'admin',
-                            senha: 'admin',
-                            role: 'admin',
-                            tempPassword: false,
-                            registros: []
-                        });
-                    }
+                // Tentar usar dados locais se existirem (fallback silencioso)
+                const usuariosLocais = JSON.parse(localStorage.getItem('usuarios')) || [];
+                const tentativasLocais = JSON.parse(localStorage.getItem('tentativasLogin')) || {};
+                const logsLocais = JSON.parse(localStorage.getItem('logsSeguranca')) || [];
+
+                if (usuariosLocais.length > 0) {
+                    console.log('Usando dados locais como fallback');
+                    usuarios = usuariosLocais;
+                    tentativasLogin = tentativasLocais;
+                    logsSeguranca = logsLocais;
                     dadosCarregados = true;
                 } else {
-                    mostrarNotificacao('Erro ao conectar com o servidor. Verifique sua conexão.', 'error');
+                    // Se não houver dados locais, avisar o usuário de forma não intrusiva
+                    mostrarNotificacao('Não foi possível carregar os dados do servidor e não há dados locais. Verifique a conexão.', 'warning');
+                    // Criar admin mínimo para permitir acesso
+                    usuarios = [{
+                        id: 1,
+                        nome: 'Administrador',
+                        usuario: 'admin',
+                        senha: 'admin',
+                        role: 'admin',
+                        tempPassword: false,
+                        registros: []
+                    }];
+                    tentativasLogin = {};
+                    logsSeguranca = [];
+                    dadosCarregados = true;
                 }
             }
         }
