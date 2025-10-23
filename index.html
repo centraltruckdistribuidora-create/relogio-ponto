@@ -586,6 +586,10 @@
                 <label for="password">Senha:</label>
                 <input type="password" id="password" placeholder="Digite sua senha">
             </div>
+            <div class="form-group" style="display:flex;align-items:center;gap:8px;justify-content:flex-start;">
+                <input type="checkbox" id="remember-password">
+                <label for="remember-password" style="margin:0;font-weight:normal;">Lembrar senha neste navegador</label>
+            </div>
             <button onclick="login()">Entrar</button>
         </div>
 
@@ -630,6 +634,13 @@
                         </thead>
                         <tbody></tbody>
                     </table>
+                </div>
+                <div style="margin-top:16px; max-width:800px; margin-left:auto; margin-right:auto;">
+                    <label for="comentario-dia" style="display:block; margin-bottom:6px; font-weight:bold;">Comentário do dia (opcional):</label>
+                    <textarea id="comentario-dia" rows="3" style="width:100%; padding:10px; border-radius:6px; border:2px solid #444; background:#222; color:#e0e0e0; resize:vertical;" placeholder="Ex.: Fiz hora extra por necessidade X, justificar..."></textarea>
+                    <div style="text-align:right; margin-top:8px;">
+                        <button onclick="salvarComentarioDia()">Salvar comentário</button>
+                    </div>
                 </div>
             </div>
 
@@ -786,6 +797,7 @@
                             <th>Data</th>
                             <th>Tipo</th>
                             <th>Horário</th>
+                            <th>Comentário/Justificativa</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -829,6 +841,7 @@
                                 <th>Saída</th>
                                 <th>Horas Trabalhadas</th>
                                 <th>Horas Extras</th>
+                                <th>Comentário/Justificativa</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -894,6 +907,9 @@
             }
             // Garantir atualização da interface mesmo que o carregamento tenha falhado
             atualizarListaUsuarios();
+            // Preencher senha salva se existir ao mudar usuário
+            const userSelectElem = document.getElementById('user-select');
+            if (userSelectElem) userSelectElem.addEventListener('change', preencherSenhaSalva);
             atualizarStatus();
             atualizarRelogio();
             inicializarFiltrosRelatorio();
@@ -910,7 +926,8 @@
                 if (usuariosError) throw usuariosError;
                 usuarios = (usuariosData || []).map(u => ({
                     ...u,
-                    registros: Array.isArray(u.registros) ? u.registros : (u.registros ? u.registros : [])
+                    registros: Array.isArray(u.registros) ? u.registros : (u.registros ? u.registros : []),
+                    comentarios: Array.isArray(u.comentarios) ? u.comentarios : (u.comentarios ? u.comentarios : [])
                 }));
                 console.log('Usuários carregados do Supabase:', usuarios);
                 atualizarListaUsuarios();
@@ -1008,7 +1025,8 @@
                             senha: usuario.senha,
                             role: usuario.role,
                             temp_password: usuario.tempPassword || false,
-                            registros: usuario.registros || []
+                            registros: usuario.registros || [],
+                            comentarios: usuario.comentarios || []
                         }]);
 
                     if (error) throw error;
@@ -1124,6 +1142,70 @@
             salvarDados();
         }
 
+        // --- Gerenciamento de senhas salvas (localStorage) ---
+        function getSavedPasswords() {
+            try {
+                return JSON.parse(localStorage.getItem('savedPasswords') || '{}');
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function setSavedPassword(usuario, senha) {
+            const map = getSavedPasswords();
+            map[usuario] = senha;
+            localStorage.setItem('savedPasswords', JSON.stringify(map));
+        }
+
+        function removeSavedPassword(usuario) {
+            const map = getSavedPasswords();
+            if (map[usuario]) {
+                delete map[usuario];
+                localStorage.setItem('savedPasswords', JSON.stringify(map));
+            }
+        }
+
+        // Preenche a senha automaticamente quando um usuário é selecionado
+        function preencherSenhaSalva() {
+            const usuario = document.getElementById('user-select').value;
+            const senhaInput = document.getElementById('password');
+            if (!usuario) {
+                senhaInput.value = '';
+                return;
+            }
+            const map = getSavedPasswords();
+            if (map[usuario]) senhaInput.value = map[usuario];
+        }
+
+        // --- Comentários do dia (por usuário) ---
+        function carregarComentarioHoje() {
+            if (!usuarioAtual) return;
+            const hoje = new Date().toLocaleDateString('en-CA');
+            const textarea = document.getElementById('comentario-dia');
+            textarea.value = '';
+            if (!Array.isArray(usuarioAtual.comentarios)) usuarioAtual.comentarios = [];
+            const c = usuarioAtual.comentarios.find(c => c.data === hoje);
+            if (c) textarea.value = c.texto || '';
+        }
+
+        function salvarComentarioDia() {
+            if (!usuarioAtual) {
+                mostrarNotificacao('Faça login antes de salvar um comentário.', 'error');
+                return;
+            }
+            const hoje = new Date().toLocaleDateString('en-CA');
+            const texto = document.getElementById('comentario-dia').value.trim();
+            if (!Array.isArray(usuarioAtual.comentarios)) usuarioAtual.comentarios = [];
+            const existente = usuarioAtual.comentarios.find(c => c.data === hoje);
+            if (existente) {
+                existente.texto = texto;
+            } else {
+                usuarioAtual.comentarios.push({ data: hoje, texto: texto });
+            }
+            salvarDados();
+            mostrarNotificacao('Comentário salvo.', 'success');
+        }
+
         // Verificar se usuário está bloqueado
         function verificarBloqueioUsuario(usuario) {
             if (!tentativasLogin[usuario]) return false;
@@ -1220,6 +1302,13 @@
             registrarLogSeguranca('Login realizado com sucesso', user.usuario);
             usuarioAtual = user;
             ultimaAtividade = Date.now();
+            // Lembrar senha se o usuário marcou a opção
+            try {
+                const remember = document.getElementById('remember-password')?.checked;
+                if (remember) setSavedPassword(user.usuario, senha);
+                else removeSavedPassword(user.usuario);
+            } catch (e) { /* ignore */ }
+
             iniciarSessao();
         }
 
@@ -1235,6 +1324,11 @@
             usuarioAtual.tempPassword = false;
             salvarDados();
             document.getElementById('modal-primeira-senha').style.display = 'none';
+            // Se o usuário marcou lembrar senha, salvar a nova senha
+            try {
+                const remember = document.getElementById('remember-password')?.checked;
+                if (remember) setSavedPassword(usuarioAtual.usuario, novaSenha);
+            } catch (e) {}
             iniciarSessao();
         }
 
@@ -1320,6 +1414,10 @@
                     ausentes++;
                 }
 
+                // Buscar comentário do dia (se houver)
+                const comentarioDia = Array.isArray(funcionario.comentarios) ? 
+                    funcionario.comentarios.find(c => c.data === dataControle) : null;
+                
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${funcionario.nome}</td>
@@ -1330,6 +1428,7 @@
                     <td>${saida ? saida.horario : '-'}</td>
                     <td>${horasTrabalhadas}</td>
                     <td style="color: ${horasExtras !== '-' ? '#ffc107' : 'inherit'}">${horasExtras}</td>
+                    <td>${comentarioDia ? comentarioDia.texto || '' : ''}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -1614,6 +1713,8 @@
             `;
             
             tbody.appendChild(tr);
+            // Carregar comentário do dia para o usuário atual
+            try { carregarComentarioHoje(); } catch(e) { /* ignore */ }
         }
 
         // Atualizar relatórios
@@ -1867,13 +1968,17 @@
             tbody.innerHTML = '';
 
             usuarios.forEach(user => {
+                if (!Array.isArray(user.comentarios)) user.comentarios = [];
                 user.registros.forEach(registro => {
                     const tr = document.createElement('tr');
+                    // Buscar comentário do dia (se houver)
+                    const comentarioDia = user.comentarios.find(c => c.data === registro.data);
                     tr.innerHTML = `
                         <td>${user.nome}</td>
                         <td>${new Date(registro.data + 'T12:00:00-03:00').toLocaleDateString('pt-BR')}</td>
                         <td>${registro.tipo.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</td>
                         <td>${registro.horario}</td>
+                        <td>${comentarioDia ? comentarioDia.texto || '' : ''}</td>
                     `;
                     tbody.appendChild(tr);
                 });
