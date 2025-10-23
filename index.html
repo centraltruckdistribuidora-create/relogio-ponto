@@ -1021,25 +1021,82 @@
                     ultima_tentativa: data.ultimaTentativa
                 }));
 
-                for (const tentativa of tentativasArray) {
-                    const { error } = await client
+                if (tentativasArray.length > 0) {
+                    // Fazer upsert em lote usando onConflict na coluna 'usuario' (evita conflito com unique constraint)
+                    const { error: tentativasError } = await client
                         .from('tentativas_login')
-                        .upsert([tentativa]);
+                        .upsert(tentativasArray, { onConflict: 'usuario' });
 
-                    if (error) throw error;
+                    if (tentativasError) throw tentativasError;
                 }
 
-                // Salvar logs de segurança
-                for (const log of logsSeguranca) {
-                    const { error } = await client
-                        .from('logs_seguranca')
-                        .upsert([{
-                            timestamp: log.timestamp,
-                            usuario: log.usuario,
-                            mensagem: log.mensagem
-                        }]);
+                // Salvar logs de segurança com regras:
+                // - Limitar a 10 logs por usuário por dia
+                // - Remover/ignorar logs com mais de 2 dias (cleanup a cada 2 dias)
+                try {
+                    // calcular agora em fuso de São Paulo
+                    const agoraSP = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+                    const doisDiasAtras = new Date(agoraSP);
+                    doisDiasAtras.setDate(doisDiasAtras.getDate() - 2);
+                    const cutoffISO = doisDiasAtras.toISOString();
 
-                    if (error) throw error;
+                    // executar cleanup remoto uma vez a cada 2 dias (usar cursor local)
+                    const lastCleanup = localStorage.getItem('lastLogsCleanup');
+                    const shouldCleanup = !lastCleanup || (new Date(agoraSP) - new Date(lastCleanup)) >= (2 * 24 * 60 * 60 * 1000);
+                    if (shouldCleanup) {
+                        try {
+                            await client.from('logs_seguranca').delete().lt('timestamp', cutoffISO);
+                            localStorage.setItem('lastLogsCleanup', agoraSP.toISOString());
+                        } catch (cleanupErr) {
+                            console.warn('Erro ao executar cleanup remoto de logs (ignorado):', cleanupErr);
+                        }
+                    }
+
+                    // Filtrar logs em memória para manter apenas os últimos 2 dias
+                    logsSeguranca = logsSeguranca.filter(l => new Date(l.timestamp) >= doisDiasAtras);
+
+                    // Agrupar por usuário e por data (no fuso de SP) e manter apenas os 10 mais recentes por dia
+                    const grupos = {};
+                    logsSeguranca.forEach(l => {
+                        const dateSP = new Date(new Date(l.timestamp).toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+                        const keyDate = `${dateSP.getFullYear()}-${String(dateSP.getMonth()+1).padStart(2,'0')}-${String(dateSP.getDate()).padStart(2,'0')}`;
+                        const key = `${l.usuario}::${keyDate}`;
+                        if (!grupos[key]) grupos[key] = [];
+                        grupos[key].push(l);
+                    });
+
+                    // Construir lista permitida (até 10 logs por usuário/dia)
+                    const permitidos = [];
+                    Object.values(grupos).forEach(arr => {
+                        arr.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)); // mais recentes primeiro
+                        const keep = arr.slice(0, 10);
+                        permitidos.push(...keep);
+                    });
+
+                    // Ordenar permitidos por timestamp asc para inserir na ordem correta
+                    permitidos.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                    // Determinar quais logs ainda não foram salvos (cursor)
+                    const lastSaved = localStorage.getItem('lastSavedLogTimestamp');
+                    const logsToInsert = lastSaved ? permitidos.filter(l => new Date(l.timestamp) > new Date(lastSaved)) : permitidos.slice();
+
+                    if (logsToInsert.length > 0) {
+                        const { error: logsError } = await client
+                            .from('logs_seguranca')
+                            .insert(logsToInsert.map(l => ({ timestamp: l.timestamp, usuario: l.usuario, mensagem: l.mensagem })));
+
+                        if (logsError) throw logsError;
+
+                        // Atualizar cursor com o último timestamp inserido
+                        const ultima = logsToInsert[logsToInsert.length - 1].timestamp;
+                        localStorage.setItem('lastSavedLogTimestamp', ultima);
+                    }
+
+                    // Limitar memória dos logs para segurança (fallback)
+                    const MAX_LOGS_MEM = 5000;
+                    if (logsSeguranca.length > MAX_LOGS_MEM) logsSeguranca = logsSeguranca.slice(-MAX_LOGS_MEM);
+                } catch (err) {
+                    throw err;
                 }
 
                 console.log('Dados salvos no Supabase com sucesso');
