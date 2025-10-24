@@ -1487,19 +1487,19 @@
                     }
 
                     if (saida) {
-                        const entradaTime = new Date(`${dataControle}T${entrada.horario}`);
-                        const saidaTime = new Date(`${dataControle}T${saida.horario}`);
+                        const entradaTime = new Date(`${dataControle}T${entrada.horario}:00-03:00`);
+                        const saidaTime = new Date(`${dataControle}T${saida.horario}:00-03:00`);
                         let duracao = (saidaTime - entradaTime) / (1000 * 60 * 60);
 
                         if (almocoInicio && almocoFim) {
-                            const almocoInicioTime = new Date(`${dataControle}T${almocoInicio.horario}`);
-                            const almocoFimTime = new Date(`${dataControle}T${almocoFim.horario}`);
+                            const almocoInicioTime = new Date(`${dataControle}T${almocoInicio.horario}:00-03:00`);
+                            const almocoFimTime = new Date(`${dataControle}T${almocoFim.horario}:00-03:00`);
                             duracao -= (almocoFimTime - almocoInicioTime) / (1000 * 60 * 60);
                         }
 
                         horasTrabalhadas = duracao.toFixed(2) + 'h';
 
-                        const saidaPadrao = new Date(`${dataControle}T${HORARIO_SAIDA}`);
+                        const saidaPadrao = new Date(`${dataControle}T${HORARIO_SAIDA}:00-03:00`);
                         if (saidaTime > saidaPadrao) {
                             const extras = (saidaTime - saidaPadrao) / (1000 * 60 * 60);
                             horasExtras = extras.toFixed(2) + 'h';
@@ -1791,20 +1791,20 @@
             let horasExtras = '-';
 
             if (entrada && saida) {
-                const entradaTime = new Date(`${hoje}T${entrada.horario}`);
-                const saidaTime = new Date(`${hoje}T${saida.horario}`);
+                const entradaTime = new Date(`${hoje}T${entrada.horario}:00-03:00`);
+                const saidaTime = new Date(`${hoje}T${saida.horario}:00-03:00`);
                 let duracao = (saidaTime - entradaTime) / (1000 * 60 * 60);
 
                 if (almocoInicio && almocoFim) {
-                    const almocoInicioTime = new Date(`${hoje}T${almocoInicio.horario}`);
-                    const almocoFimTime = new Date(`${hoje}T${almocoFim.horario}`);
+                    const almocoInicioTime = new Date(`${hoje}T${almocoInicio.horario}:00-03:00`);
+                    const almocoFimTime = new Date(`${hoje}T${almocoFim.horario}:00-03:00`);
                     duracao -= (almocoFimTime - almocoInicioTime) / (1000 * 60 * 60);
                 }
 
                 horasTrabalhadas = duracao.toFixed(2) + 'h';
 
                 // Calcular horas extras
-                const saidaPadrao = new Date(`${hoje}T${HORARIO_SAIDA}`);
+                const saidaPadrao = new Date(`${hoje}T${HORARIO_SAIDA}:00-03:00`);
                 if (saidaTime > saidaPadrao) {
                     const extras = (saidaTime - saidaPadrao) / (1000 * 60 * 60);
                     horasExtras = extras.toFixed(2) + 'h';
@@ -1863,14 +1863,14 @@
                 if (entrada && saida) {
                     diasTrabalhados++;
 
-                    const entradaTime = new Date(`${data}T${entrada.horario}`);
-                    const saidaTime = new Date(`${data}T${saida.horario}`);
+                    const entradaTime = new Date(`${data}T${entrada.horario}:00-03:00`);
+                    const saidaTime = new Date(`${data}T${saida.horario}:00-03:00`);
                     let horasTrabalhadas = (saidaTime - entradaTime) / (1000 * 60 * 60);
 
                     let almocoDuracao = 0;
                     if (almocoInicio && almocoFim) {
-                        const almocoInicioTime = new Date(`${data}T${almocoInicio.horario}`);
-                        const almocoFimTime = new Date(`${data}T${almocoFim.horario}`);
+                        const almocoInicioTime = new Date(`${data}T${almocoInicio.horario}:00-03:00`);
+                        const almocoFimTime = new Date(`${data}T${almocoFim.horario}:00-03:00`);
                         almocoDuracao = (almocoFimTime - almocoInicioTime) / (1000 * 60 * 60);
                     } else if (regs.some(r => r.tipo.includes('almoco'))) {
                         // Se registrou almoço mas não fechou, assumir 1.5h
@@ -1880,7 +1880,7 @@
                     horasTrabalhadas -= almocoDuracao;
 
                     let horasExtras = 0;
-                    const saidaPadrao = new Date(`${data}T${HORARIO_SAIDA}`);
+                    const saidaPadrao = new Date(`${data}T${HORARIO_SAIDA}:00-03:00`);
                     if (saidaTime > saidaPadrao) {
                         horasExtras = (saidaTime - saidaPadrao) / (1000 * 60 * 60);
                     }
@@ -2208,19 +2208,19 @@
                 let horasExtras = '-';
                 
                 if (entrada !== '-' && saida !== '-') {
-                    const entradaTime = new Date(`${data}T${entrada}`);
-                    const saidaTime = new Date(`${data}T${saida}`);
+                    const entradaTime = new Date(`${data}T${entrada}:00-03:00`);
+                    const saidaTime = new Date(`${data}T${saida}:00-03:00`);
                     let duracao = (saidaTime - entradaTime) / (1000 * 60 * 60);
-                    
+
                     if (almoco_inicio !== '-' && almoco_fim !== '-') {
-                        const almocoInicio = new Date(`${data}T${almoco_inicio}`);
-                        const almocoFim = new Date(`${data}T${almoco_fim}`);
+                        const almocoInicio = new Date(`${data}T${almoco_inicio}:00-03:00`);
+                        const almocoFim = new Date(`${data}T${almoco_fim}:00-03:00`);
                         duracao -= (almocoFim - almocoInicio) / (1000 * 60 * 60);
                     }
-                    
+
                     horasTrabalhadas = duracao.toFixed(2);
-                    
-                    const saidaPadrao = new Date(`${data}T${HORARIO_SAIDA}`);
+
+                    const saidaPadrao = new Date(`${data}T${HORARIO_SAIDA}:00-03:00`);
                     if (saidaTime > saidaPadrao) {
                         horasExtras = ((saidaTime - saidaPadrao) / (1000 * 60 * 60)).toFixed(2);
                     } else {
@@ -2288,19 +2288,19 @@
                 let horasExtras = '-';
                 
                 if (entrada !== '-' && saida !== '-') {
-                    const entradaTime = new Date(`${data}T${entrada}`);
-                    const saidaTime = new Date(`${data}T${saida}`);
+                    const entradaTime = new Date(`${data}T${entrada}:00-03:00`);
+                    const saidaTime = new Date(`${data}T${saida}:00-03:00`);
                     let duracao = (saidaTime - entradaTime) / (1000 * 60 * 60);
-                    
+
                     if (almoco_inicio !== '-' && almoco_fim !== '-') {
-                        const almocoInicio = new Date(`${data}T${almoco_inicio}`);
-                        const almocoFim = new Date(`${data}T${almoco_fim}`);
+                        const almocoInicio = new Date(`${data}T${almoco_inicio}:00-03:00`);
+                        const almocoFim = new Date(`${data}T${almoco_fim}:00-03:00`);
                         duracao -= (almocoFim - almocoInicio) / (1000 * 60 * 60);
                     }
-                    
+
                     horasTrabalhadas = duracao.toFixed(2);
-                    
-                    const saidaPadrao = new Date(`${data}T${HORARIO_SAIDA}`);
+
+                    const saidaPadrao = new Date(`${data}T${HORARIO_SAIDA}:00-03:00`);
                     if (saidaTime > saidaPadrao) {
                         horasExtras = ((saidaTime - saidaPadrao) / (1000 * 60 * 60)).toFixed(2);
                     } else {
