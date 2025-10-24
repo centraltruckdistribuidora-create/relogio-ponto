@@ -573,6 +573,14 @@
 </head>
 <body>
     <div class="container">
+        <!-- Modal LGPD -->
+        <div id="modal-lgpd" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.7);z-index:9999;justify-content:center;align-items:center;">
+            <div style="background:#222;padding:30px;border-radius:10px;max-width:400px;text-align:center;color:#fff;">
+                <h2>Consentimento LGPD</h2>
+                <p>Para utilizar este sistema, você precisa concordar com a coleta e uso dos seus dados pessoais conforme nossa <a href="#" id="link-privacidade" style="color:#67e">Política de Privacidade</a>.</p>
+                <button id="btn-aceitar-lgpd" style="margin-top:20px;background:#67e;color:#fff;padding:10px 30px;border:none;border-radius:5px;">Concordo e quero continuar</button>
+            </div>
+        </div>
         <!-- Tela de Login -->
         <div id="login-screen" class="login-screen">
             <h1>Sistema de Controle de Ponto</h1>
@@ -1160,6 +1168,23 @@
 
         // Registrar log de segurança
         function registrarLogSeguranca(mensagem, usuario) {
+        // Função para registrar auditoria no Supabase
+        async function registrarAuditoria(acao, registro, motivo = "") {
+            if (!window.supabase || !window.usuarioLogado) return;
+            try {
+                await window.supabase.from('auditoria').insert({
+                    usuario_id: window.usuarioLogado.id,
+                    usuario_nome: window.usuarioLogado.nome,
+                    acao: acao,
+                    registro_id: registro.id || registro,
+                    registro_data: registro.data_hora || registro.data || new Date().toISOString(),
+                    motivo: motivo,
+                    data_hora: new Date().toISOString()
+                });
+            } catch (e) {
+                console.error('Erro ao registrar auditoria:', e);
+            }
+        }
             logsSeguranca.push({
                 timestamp: new Date().toISOString(),
                 usuario: usuario,
@@ -1240,6 +1265,8 @@
                 mostrarNotificacao('Usuário não encontrado!', 'error');
                 return;
             }
+            // Coletar registros removidos para auditoria
+            const registrosRemovidos = (user.registros || []).filter(r => r.data === data);
             // Remover registros da data
             const antes = (user.registros || []).length;
             user.registros = (user.registros || []).filter(r => r.data !== data);
@@ -1253,6 +1280,10 @@
             atualizarControle();
             mostrarNotificacao(`Registros removidos: ${antes - depois}`, 'success');
             registrarLogSeguranca(`Registros de ${usuario} em ${data} excluídos pelo administrador`, usuario);
+            // Registrar auditoria para cada registro removido
+            registrosRemovidos.forEach(registro => {
+                registrarAuditoria('exclusao', registro, `Exclusão pelo admin (${usuario})`);
+            });
         }
 
         // A função de exclusão de registros pelo próprio usuário foi removida
@@ -1320,6 +1351,21 @@
             if (!user) {
                 registrarLogSeguranca('Tentativa de login com usuário inexistente', usuario);
                 mostrarNotificacao('Usuário não encontrado!', 'error');
+                return;
+            }
+
+            // Consentimento LGPD: se o usuário ainda não aceitou, mostrar modal e salvar aceitação
+            if (!user.lgpd_aceite) {
+                document.getElementById('modal-lgpd').style.display = 'flex';
+                document.getElementById('btn-aceitar-lgpd').onclick = function() {
+                    user.lgpd_aceite = true;
+                    salvarDados();
+                    document.getElementById('modal-lgpd').style.display = 'none';
+                    login(); // tentar fazer login novamente
+                };
+                document.getElementById('link-privacidade').onclick = function() {
+                    alert('Política de Privacidade: Seus dados são utilizados apenas para fins de controle de ponto, nunca compartilhados com terceiros. Você pode solicitar anonimização ou exclusão a qualquer momento.');
+                };
                 return;
             }
 
@@ -1447,6 +1493,22 @@
                 console.warn('Erro ao restaurar sessão:', e);
             }
         }
+
+        // Link para política de privacidade no rodapé (adicionado fora da função login)
+        window.addEventListener('DOMContentLoaded', function() {
+            try {
+                if (!document.getElementById('footer-privacidade')) {
+                    const rodape = document.createElement('div');
+                    rodape.style.textAlign = 'center';
+                    rodape.style.marginTop = '30px';
+                    rodape.innerHTML = '<a href="#" id="footer-privacidade" style="color:#67e">Política de Privacidade</a>';
+                    document.body.appendChild(rodape);
+                    document.getElementById('footer-privacidade').onclick = function() {
+                        alert('Política de Privacidade: Seus dados são utilizados apenas para fins de controle de ponto, nunca compartilhados com terceiros. Você pode solicitar anonimização ou exclusão a qualquer momento.');
+                    };
+                }
+            } catch (e) { /* ignore */ }
+        });
 
         // Atualizar controle de ponto
         function atualizarControle() {
@@ -1690,15 +1752,33 @@
                     // Verificar horários fora da tolerância (5 minutos)
                     verificarHorario(tipo, horario);
 
-                    usuarioAtual.registros.push({
+                    const registroNovo = {
+                        usuario: window.usuarioLogado.usuario,
                         data: hoje,
                         tipo: tipo,
-                        horario: horario
+                        horario: horario,
+                        local: `${userLat},${userLng}`,
+                        comentario: (typeof comentarioDia !== 'undefined') ? comentarioDia : ''
+                    };
+                    gerarHashRegistro(registroNovo).then(hash => {
+                        registroNovo.hash = hash;
+                        usuarioAtual.registros.push(registroNovo);
+                        // Salvar no Supabase
+                        window.supabase
+                            .from('registros')
+                            .insert(registroNovo)
+                            .then(({ error }) => {
+                                if (error) {
+                                    mostrarNotificacao('Erro ao registrar ponto: ' + error.message, 'error');
+                                } else {
+                                    mostrarNotificacao(`Registro de ${tipo.replace('_', ' ')} realizado!`, 'success');
+                                    atualizarRegistrosHoje();
+                                    atualizarControle();
+                                }
+                            });
+                        salvarDados();
+                        atualizarInterface();
                     });
-
-                    salvarDados();
-                    atualizarInterface();
-                    mostrarNotificacao(`Registro de ${tipo.replace('_', ' ')} realizado!`, 'success');
                 },
                 (error) => {
                     let mensagemErro = 'Erro ao obter localização!';
@@ -2360,6 +2440,124 @@
             XLSX.writeFile(wb, `relatorio_geral.xlsx`);
 
             mostrarNotificacao('Relatório geral exportado com sucesso!', 'success');
+        }
+
+        // --- Funcionalidades adicionais: AFD, Backup e Hash ---
+        // Função para gerar hash SHA-256 de um registro
+        async function gerarHashRegistro(registro) {
+            const texto = JSON.stringify({
+                usuario: registro.usuario,
+                data: registro.data,
+                horario: registro.horario,
+                tipo: registro.tipo,
+                local: registro.local || '',
+                comentario: registro.comentario || ''
+            });
+            const encoder = new TextEncoder();
+            const data = encoder.encode(texto);
+            const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // Exportar registros em formato AFD (Arquivo Fonte de Dados)
+        async function exportarAFD() {
+            try {
+                const { data: registros, error } = await client.from('registros').select('*');
+                if (error) {
+                    mostrarNotificacao('Erro ao exportar AFD!', 'error');
+                    return;
+                }
+                const linhas = registros.map(r => {
+                    let tipoNum = 0;
+                    switch (r.tipo) {
+                        case 'entrada': tipoNum = 1; break;
+                        case 'saida': tipoNum = 2; break;
+                        case 'almoco_inicio': tipoNum = 3; break;
+                        case 'almoco_fim': tipoNum = 4; break;
+                        default: tipoNum = 0;
+                    }
+                    const dataStr = (r.data || '').replace(/-/g, '');
+                    const horaStr = (r.horario || '').replace(/:/g, '').slice(0,4);
+                    const pis = r.pis || r.usuario || '';
+                    const nome = r.nome || '';
+                    const hash = r.hash || '';
+                    return `${tipoNum};${dataStr};${horaStr};${pis};${nome};${hash}`;
+                });
+                const conteudo = linhas.join('\n');
+                const blob = new Blob([conteudo], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `AFD_ponto_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.txt`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                mostrarNotificacao('AFD exportado com sucesso!', 'success');
+            } catch (e) {
+                console.error(e);
+                mostrarNotificacao('Falha ao exportar AFD!', 'error');
+            }
+        }
+
+        // Exportar registros de ponto e auditoria para backup (JSON)
+        async function exportarBackup() {
+            try {
+                const { data: registros, error: errReg } = await client.from('registros').select('*');
+                const { data: auditoria, error: errAud } = await client.from('auditoria').select('*');
+                if (errReg || errAud) {
+                    mostrarNotificacao('Erro ao exportar dados para backup!', 'error');
+                    return;
+                }
+                const backup = {
+                    registros,
+                    auditoria,
+                    data_exportacao: new Date().toISOString()
+                };
+                const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `backup_ponto_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                mostrarNotificacao('Backup exportado com sucesso!', 'success');
+            } catch (e) {
+                console.error(e);
+                mostrarNotificacao('Falha ao exportar backup!', 'error');
+            }
+        }
+
+        // Adicionar botões de AFD e Backup no painel do administrador
+        function adicionarBotaoAFD() {
+            const adminPanel = document.getElementById('admin-panel');
+            if (!adminPanel || document.getElementById('btn-afd')) return;
+            const btn = document.createElement('button');
+            btn.id = 'btn-afd';
+            btn.textContent = 'Exportar AFD (TXT)';
+            btn.onclick = exportarAFD;
+            btn.style.margin = '10px 0';
+            adminPanel.appendChild(btn);
+        }
+
+        function adicionarBotaoBackup() {
+            const adminPanel = document.getElementById('admin-panel');
+            if (!adminPanel || document.getElementById('btn-backup')) return;
+            const btn = document.createElement('button');
+            btn.id = 'btn-backup';
+            btn.textContent = 'Exportar Backup';
+            btn.onclick = exportarBackup;
+            btn.style.margin = '10px 0';
+            adminPanel.appendChild(btn);
+        }
+
+        // Inserir os botões se o usuário atual for admin
+        if (window.usuarioLogado && window.usuarioLogado.admin) {
+            adicionarBotaoAFD();
+            adicionarBotaoBackup();
         }
     </script>
 </body>
