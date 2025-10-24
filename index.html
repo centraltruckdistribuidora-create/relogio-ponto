@@ -638,7 +638,7 @@
                 <div style="margin-top:16px; max-width:800px; margin-left:auto; margin-right:auto;">
                     <label for="comentario-dia" style="display:block; margin-bottom:6px; font-weight:bold;">Comentário do dia (opcional):</label>
                     <textarea id="comentario-dia" rows="3" style="width:100%; padding:10px; border-radius:6px; border:2px solid #444; background:#222; color:#e0e0e0; resize:vertical;" placeholder="Ex.: Fiz hora extra por necessidade X, justificar..."></textarea>
-                    <div style="text-align:right; margin-top:8px;">
+                    <div style="text-align:right; margin-top:8px; display:flex; gap:8px; justify-content:flex-end;">
                         <button onclick="salvarComentarioDia()">Salvar comentário</button>
                     </div>
                 </div>
@@ -697,6 +697,7 @@
                                 <th>Saída</th>
                                 <th>Horas Trabalhadas</th>
                                 <th>Horas Extras</th>
+                                <th>Comentário</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -798,6 +799,7 @@
                             <th>Tipo</th>
                             <th>Horário</th>
                             <th>Comentário/Justificativa</th>
+                            <th>Ações</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -835,6 +837,7 @@
                             <tr>
                                 <th>Funcionário</th>
                                 <th>Status</th>
+                                <th>Linha do dia</th>
                                 <th>Entrada</th>
                                 <th>Início Almoço</th>
                                 <th>Fim Almoço</th>
@@ -913,6 +916,12 @@
             atualizarStatus();
             atualizarRelogio();
             inicializarFiltrosRelatorio();
+            // Tentar restaurar sessão existente (se houver)
+            try { restoreSession(); } catch (e) { /* ignore */ }
+            // Atualizar expiry em atividade do usuário para manter sessão viva
+            ['click','keydown','mousemove','touchstart'].forEach(evt =>
+                document.addEventListener(evt, () => { if (usuarioAtual) refreshSessionExpiry(); })
+            );
         });
 
         // Carregar dados do Supabase
@@ -924,10 +933,20 @@
                     .select('*');
 
                 if (usuariosError) throw usuariosError;
+                // Migrar comentários temporários do localStorage se existirem
+                let comentariosTemp = {};
+                try {
+                    const tempStr = localStorage.getItem('comentariosTemp');
+                    if (tempStr) {
+                        comentariosTemp = JSON.parse(tempStr);
+                    }
+                } catch (e) { /* ignore */ }
+                
                 usuarios = (usuariosData || []).map(u => ({
                     ...u,
                     registros: Array.isArray(u.registros) ? u.registros : (u.registros ? u.registros : []),
-                    comentarios: Array.isArray(u.comentarios) ? u.comentarios : (u.comentarios ? u.comentarios : [])
+                    comentarios: Array.isArray(u.comentarios) ? u.comentarios : 
+                        (comentariosTemp[u.usuario] || []) // usar comentários do Supabase ou migrar do temp
                 }));
                 console.log('Usuários carregados do Supabase:', usuarios);
                 atualizarListaUsuarios();
@@ -1014,7 +1033,7 @@
             if (!dadosCarregados) return; // Não salvar se dados não foram carregados
 
             try {
-                // Salvar usuários
+                // Salvar usuários com comentários
                 for (const usuario of usuarios) {
                     const { error } = await client
                         .from('usuarios')
@@ -1031,6 +1050,13 @@
 
                     if (error) throw error;
                 }
+                
+                // Limpar comentários temporários do localStorage agora que estão no Supabase
+                try {
+                    if (localStorage.getItem('comentariosTemp')) {
+                        localStorage.removeItem('comentariosTemp');
+                    }
+                } catch (e) { /* ignore */ }
 
                 // Salvar tentativas de login
                 const tentativasArray = Object.entries(tentativasLogin).map(([usuario, data]) => ({
@@ -1206,6 +1232,32 @@
             mostrarNotificacao('Comentário salvo.', 'success');
         }
 
+        // Excluir registros de um usuário numa data específica (admin)
+        function excluirRegistroUsuario(usuario, data) {
+            if (!confirm(`Confirma excluir os registros de ${usuario} na data ${data}? Esta ação não pode ser desfeita.`)) return;
+            const user = usuarios.find(u => u.usuario === usuario);
+            if (!user) {
+                mostrarNotificacao('Usuário não encontrado!', 'error');
+                return;
+            }
+            // Remover registros da data
+            const antes = (user.registros || []).length;
+            user.registros = (user.registros || []).filter(r => r.data !== data);
+            const depois = user.registros.length;
+            // Remover comentário do dia também
+            if (Array.isArray(user.comentarios)) {
+                user.comentarios = user.comentarios.filter(c => c.data !== data);
+            }
+            salvarDados();
+            atualizarAdmin();
+            atualizarControle();
+            mostrarNotificacao(`Registros removidos: ${antes - depois}`, 'success');
+            registrarLogSeguranca(`Registros de ${usuario} em ${data} excluídos pelo administrador`, usuario);
+        }
+
+        // A função de exclusão de registros pelo próprio usuário foi removida
+        // para garantir que apenas administradores possam apagar registros.
+
         // Verificar se usuário está bloqueado
         function verificarBloqueioUsuario(usuario) {
             if (!tentativasLogin[usuario]) return false;
@@ -1302,6 +1354,12 @@
             registrarLogSeguranca('Login realizado com sucesso', user.usuario);
             usuarioAtual = user;
             ultimaAtividade = Date.now();
+            // Persistir sessão no localStorage (username + expiry)
+            try {
+                localStorage.setItem('sessionUser', user.usuario);
+                const expiry = new Date(Date.now() + TIMEOUT_SESSAO_MINUTOS * 60 * 1000).toISOString();
+                localStorage.setItem('sessionExpiry', expiry);
+            } catch (e) { /* ignore */ }
             // Lembrar senha se o usuário marcou a opção
             try {
                 const remember = document.getElementById('remember-password')?.checked;
@@ -1337,6 +1395,9 @@
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('app').style.display = 'block';
 
+            // Atualizar expiry na sessão ao iniciar sessão
+            try { refreshSessionExpiry(); } catch (e) { /* ignore */ }
+
             if (usuarioAtual.role === 'admin') {
                 document.getElementById('admin-tabs').style.display = 'flex';
                 document.getElementById('funcionario-tabs').style.display = 'none';
@@ -1351,6 +1412,40 @@
             }
 
             mostrarNotificacao('Login realizado com sucesso!', 'success');
+        }
+
+        // Atualiza o expiry da sessão no localStorage
+        function refreshSessionExpiry() {
+            try {
+                const expiry = new Date(Date.now() + TIMEOUT_SESSAO_MINUTOS * 60 * 1000).toISOString();
+                localStorage.setItem('sessionExpiry', expiry);
+            } catch (e) { /* ignore */ }
+        }
+
+        // Restaura sessão do localStorage se ainda válida
+        function restoreSession() {
+            try {
+                const usuarioSess = localStorage.getItem('sessionUser');
+                const expiry = localStorage.getItem('sessionExpiry');
+                if (!usuarioSess || !expiry) return;
+                const expDate = new Date(expiry);
+                if (isNaN(expDate.getTime())) return;
+                if (new Date() > expDate) {
+                    // sessão expirada
+                    localStorage.removeItem('sessionUser');
+                    localStorage.removeItem('sessionExpiry');
+                    return;
+                }
+                // Localizar usuário carregado
+                const user = usuarios.find(u => u.usuario === usuarioSess);
+                if (!user) return;
+                usuarioAtual = user;
+                // Atualizar ultimaAtividade e UI
+                ultimaAtividade = Date.now();
+                iniciarSessao();
+            } catch (e) {
+                console.warn('Erro ao restaurar sessão:', e);
+            }
         }
 
         // Atualizar controle de ponto
@@ -1417,11 +1512,23 @@
                 // Buscar comentário do dia (se houver)
                 const comentarioDia = Array.isArray(funcionario.comentarios) ? 
                     funcionario.comentarios.find(c => c.data === dataControle) : null;
-                
+
+                // Construir linha do dia (timeline compacta)
+                const regsDia = funcionario.registros.filter(r => r.data === dataControle)
+                    .slice().sort((a,b) => (a.horario || '').localeCompare(b.horario || ''));
+                const labelMap = {
+                    'entrada': 'Entrada',
+                    'almoco_inicio': 'Início Alm.',
+                    'almoco_fim': 'Fim Alm.',
+                    'saida': 'Saída'
+                };
+                const timeline = regsDia.map(r => `${labelMap[r.tipo] || r.tipo} ${r.horario || ''}`).join(' • ');
+
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${funcionario.nome}</td>
                     <td class="${statusClass}">${status}</td>
+                    <td style="white-space:normal; max-width:240px">${timeline || '-'}</td>
                     <td>${entrada ? entrada.horario : '-'}</td>
                     <td>${almocoInicio ? almocoInicio.horario : '-'}</td>
                     <td>${almocoFim ? almocoFim.horario : '-'}</td>
@@ -1447,6 +1554,10 @@
             document.getElementById('admin-tab').style.display = 'none';
             document.getElementById('password').value = '';
             document.getElementById('user-select').value = '';
+            try {
+                localStorage.removeItem('sessionUser');
+                localStorage.removeItem('sessionExpiry');
+            } catch (e) { /* ignore */ }
         }
 
         // Mostrar aba
@@ -1779,6 +1890,8 @@
 
                     const tr = document.createElement('tr');
                     const dataCorrigida = new Date(data + 'T12:00:00-03:00');
+                    // Buscar comentário do usuário para essa data
+                    const comentario = (usuarioAtual.comentarios || []).find(c => c.data === data);
                     tr.innerHTML = `
                         <td>${dataCorrigida.toLocaleDateString('pt-BR')}</td>
                         <td>${entrada.horario}</td>
@@ -1786,6 +1899,7 @@
                         <td>${almocoDuracao.toFixed(2)}h</td>
                         <td>${horasTrabalhadas.toFixed(2)}h</td>
                         <td>${horasExtras.toFixed(2)}h</td>
+                        <td>${comentario ? comentario.texto || '' : ''}</td>
                     `;
                     tbody.appendChild(tr);
                 }
@@ -1979,6 +2093,7 @@
                         <td>${registro.tipo.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</td>
                         <td>${registro.horario}</td>
                         <td>${comentarioDia ? comentarioDia.texto || '' : ''}</td>
+                        <td><button onclick="excluirRegistroUsuario('${user.usuario}', '${registro.data}')" style="background:#dc3545;color:#fff;padding:6px 8px;border-radius:4px;border:none;cursor:pointer;">Excluir</button></td>
                     `;
                     tbody.appendChild(tr);
                 });
